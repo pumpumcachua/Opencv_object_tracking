@@ -224,7 +224,7 @@ int main(int argc, char** argv) {
 	 }
 	
 	trackers.add(algorithms, frame, objects);
-	int largest_area = 0;
+	
 	int largest_contour_index = 0;
 	Rect bounding_rect;
 	// do the tracking
@@ -251,6 +251,7 @@ int main(int argc, char** argv) {
 		findContours(clone, cnts, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE,Point(0,0));
 		for (int i = 0; i< cnts.size(); i++) // iterate through each contour. 
 		{
+			int largest_area = 0;
 			double a = contourArea(cnts[i], false);  //  Find the area of contour
 			if (a>largest_area) {
 				largest_area = a;
@@ -258,6 +259,7 @@ int main(int argc, char** argv) {
 				bounding_rect = boundingRect(cnts[i]); // Find the bounding rectangle for biggest contour
 			}
 		}
+		//cout << (bounding_rect.br() + bounding_rect.tl())*0.5 << endl;
 		rectangle(frame, bounding_rect, Scalar(0, 255, 0), 1, 8, 0);
 		imshow("Threshold Image", mask);
 		// stop the program if no more images
