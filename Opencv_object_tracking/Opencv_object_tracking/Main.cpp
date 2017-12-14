@@ -144,11 +144,11 @@ int main(int argc, char** argv) {
 	 // show help
 	  if (argc<2) {
 		  cout <<
-			  " Usage: Object-tracking <video_path> [algorithm]\n"
+			  " Usage: Opencv_object_tracking <video_path> [algorithm]\n"
 			  " Algorithm: BOOSTING MIL KCF TLD MEDIANFLOW"
 			  " examples:\n"
-			  " Object-tracking Bolt/img/%04d.jpg\n"
-			  " Object-tracking faceocc2.webm MEDIANFLOW\n"
+			  " Opencv_object_tracking-tracking videos/1.mp4\n"
+			  " Opencv_object_tracking-tracking faceocc2.webm MEDIANFLOW\n"
 			  << endl;;
 	    return -1;
 		}
@@ -208,78 +208,111 @@ int main(int argc, char** argv) {
 	vector<Vec3b> hsvVector;
 	for (size_t i = 0; i < ROIs.size(); i++)
 	{
+		//Add algorithm to trackers
 	    algorithms.push_back(TrackerAlgorithm(trackingAlg));
+		//Get object array from selected ROIs
 	    objects.push_back(ROIs[i]);
-		 deque<Point> tmpQueue;
-		 Point center = (ROIs[i].br() + ROIs[i].tl())*0.5;
-		 tmpQueue.push_back(center);
-		 centerQueues.push_back(tmpQueue);
-		 uchar blue = rand() % 255;
-		 uchar green = rand() % 255;
-		 uchar red=rand() % 255;
-		 Vec3b tmpcolor(blue, green, red);
-		 colors.push_back(tmpcolor);
-		 Vec3b hsvTmp = hsvframe.at<Vec3b>(center);
-		 hsvVector.push_back(hsvTmp);
+		//Get center of ROIs
+		deque<Point> tmpQueue;
+		Point center = (ROIs[i].br() + ROIs[i].tl())*0.5;
+		tmpQueue.push_back(center);
+		centerQueues.push_back(tmpQueue);
+		//Get Color for trajectory 
+		uchar blue = rand() % 255;
+		uchar green = rand() % 255;
+		uchar red=rand() % 255;
+		Vec3b tmpcolor(blue, green, red);
+		colors.push_back(tmpcolor);
+		Vec3b hsvTmp = hsvframe.at<Vec3b>(center);
+		//Get center hsv color
+		hsvVector.push_back(hsvTmp);
 	 }
-	
+	//Add tracker 
 	trackers.add(algorithms, frame, objects);
 	
 	int largest_contour_index = 0;
-	Rect bounding_rect;
 	// do the tracking
 	cout << "Start the tracking process, press ESC to quit." <<endl;
 	while (cap.read(frame))
 	{
-		Mat mask;
-		Vec3b hsvPoint = hsvVector.back();
-		int Hue = hsvPoint.val[0];
-		int H_range = (Hue >= 128) ? 255 - Hue : Hue;
-		int Saturation = hsvPoint.val[1];
-		int S_range = (Saturation >= 128) ? 255 - Saturation : Saturation;
-		int Value = hsvPoint.val[2];
-		int V_range = (Value >= 128) ? 255 - Value : Value;
-		cvtColor(frame, hsvframe, CV_BGR2HSV);
-		inRange(hsvframe, Scalar(Hue-H_range/2, Saturation- S_range/2, Value - V_range/2), Scalar(Hue + H_range/2, Saturation + S_range / 2, Value + V_range / 2),mask);
-		if (mask.empty())
-			return 0;
-		erode(mask, mask,0,Point(-1,-1),2);
-		dilate(mask, mask, 0, Point(-1, -1), 2);
+		//update the tracking result
+		bool ok = trackers.update(frame);
 
-		Mat clone = mask.clone();
-		vector<vector<Point>> cnts;
-		findContours(clone, cnts, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE,Point(0,0));
-		for (int i = 0; i< cnts.size(); i++) // iterate through each contour. 
+		if (ok)
 		{
-			int largest_area = 0;
-			double a = contourArea(cnts[i], false);  //  Find the area of contour
-			if (a>largest_area) {
-				largest_area = a;
-				largest_contour_index = i;                //Store the index of largest contour
-				bounding_rect = boundingRect(cnts[i]); // Find the bounding rectangle for biggest contour
+			//cout << " OK" << endl;
+			// draw the tracked object
+			for (unsigned i = 0; i < trackers.getObjects().size(); i++)
+			{
+				
+				Rect2d Box = trackers.getObjects()[i];
+				rectangle(frame, Box, Scalar(255, 0, 0), 2, 1);
+				centerQueues[i].push_front((Box.br() + Box.tl())*0.5);
+
+				for (int j = 0; j < centerQueues[i].size() - 1 && j < 200; j++)
+				{
+					line(frame, centerQueues[i][j], centerQueues[i][j + 1], colors[i], 1, 8, 0);
+				}
 			}
 		}
-		//cout << (bounding_rect.br() + bounding_rect.tl())*0.5 << endl;
-		rectangle(frame, bounding_rect, Scalar(0, 255, 0), 1, 8, 0);
-		imshow("Threshold Image", mask);
-		// stop the program if no more images
-		if (frame.rows == 0 || frame.cols == 0)
-			break;
-
-		//update the tracking result
-		trackers.update(frame);
-
-		// draw the tracked object
-		for (unsigned i = 0; i < trackers.getObjects().size(); i++)
+		else 
 		{
-			Rect2d Box = trackers.getObjects()[i];
-			rectangle(frame, Box, Scalar(255, 0, 0), 2, 1);
-			centerQueues[i].push_front((Box.br() + Box.tl())*0.5);
-
-			for (int j = 0; j < centerQueues[i].size() - 1 && j < 200; j++)
+			double threshold = 500;
+			//cout << "LOST tracking" << endl;
+			//clear all objects
+			objects.clear();
+			for (int index = 0; index < hsvVector.size(); index++)
 			{
-				line(frame, centerQueues[i][j], centerQueues[i][j + 1], colors[i], 1, 8, 0);
-				//cout << centerQueues[i][j].x << " " << centerQueues[i][j].y << endl << colors[i] << endl;
+				Mat mask;
+				Rect box;
+				Vec3b hsvPoint = hsvVector[index];
+				int Hue = hsvPoint.val[0];
+				int H_range = (Hue >= 128) ? 255 - Hue : Hue;
+				int Saturation = hsvPoint.val[1];
+				int S_range = (Saturation >= 128) ? 255 - Saturation : Saturation;
+				int Value = hsvPoint.val[2];
+				int V_range = (Value >= 128) ? 255 - Value : Value;
+				cvtColor(frame, hsvframe, CV_BGR2HSV);
+				inRange(hsvframe, Scalar(Hue - H_range / 2, Saturation - S_range / 2, Value - V_range / 2), Scalar(Hue + H_range / 2, Saturation + S_range / 2, Value + V_range / 2), mask);
+				if (mask.empty())
+					continue;
+				erode(mask, mask, 0, Point(-1, -1), 2);
+				dilate(mask, mask, 0, Point(-1, -1), 2);
+
+				Mat clone = mask.clone();
+				vector<vector<Point>> cnts;
+				//find contours
+				findContours(clone, cnts, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE, Point(0, 0));
+				//find largest contour
+				for (int i = 0; i < cnts.size(); i++) // iterate through each contour. 
+				{
+					int largest_area = 0;
+					double a = contourArea(cnts[i], false);  //  Find the area of contour
+					if (a > largest_area) {
+						largest_area = a;
+						largest_contour_index = i;                //Store the index of largest contour
+						box = boundingRect(cnts[i]); // Find the bounding rectangle for biggest contour
+					}
+				}
+
+				if (!box.empty() && (box.height*box.width >= threshold))
+				{
+					objects.push_back(box);
+					centerQueues[index].push_front((box.br() + box.tl())*0.5);
+				}
+				//draw objects
+				rectangle(frame, box, Scalar(255, 0, 0), 2, 1);
+				
+				for (int j = 0; j < centerQueues[index].size() - 1 && j < 200; j++)
+				{
+					line(frame, centerQueues[index][j], centerQueues[index][j + 1], colors[index], 1, 8, 0);
+				}
+				
+			}
+		
+			if (!objects.empty())
+			{
+				trackers.update(frame, objects);
 			}
 		}
 		// Display tracker type on frame
@@ -289,8 +322,12 @@ int main(int argc, char** argv) {
 		imshow("tracker", frame);
 
 		//quit on ESC button
-		if (waitKey(1) == 27)break;
+		if (waitKey(1) == 27)
+			break;
 
+		// stop the program if no more images
+		if (frame.rows == 0 || frame.cols == 0)
+			break;
 	}
 	return 0;
 }
